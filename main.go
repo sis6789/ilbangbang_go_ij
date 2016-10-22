@@ -18,6 +18,16 @@ import (
 	"time"
 )
 
+// Definitions
+var courseList = [...]string{"http://pod.ssenhosting.com/rss/tomato2u/ilbangbangspeaking.xml",
+	"http://pod.ssenhosting.com/rss/tomato2u/ilbangbang.xml",
+	"http://pod.ssenhosting.com/rss/tomato2u/ilbangbangch.xml",
+	"http://pod.ssenhosting.com/rss/tomato2u/ilbangbangabc.xml",
+	"http://pod.ssenhosting.com/rss/tomato2u/businessenglish.xml",
+}
+
+var countofDownloader int = 12
+
 // GetContent get URL as byte array
 func GetUrlContent(url string) ([]byte, error) {
 	var result []byte
@@ -70,15 +80,15 @@ type item struct {
 	Summary     string `xml:"summary"`
 	Description string `xml:"description"`
 	Enclosure   struct {
-		Url    string `xml:"url,attr"`
-		Length string `xml:"length,attr"`
-		Type   string `xml:"type,attr"`
-	} `xml:"enclosure"`
-	Guid     string `xml:"guid"`
-	PubDate  string `xml:"pubDate"`
-	Duration string `xml:"duration"`
-	Explicit string `xml:"explicit"`
-	Keywords string `xml:"keywords"`
+			    Url    string `xml:"url,attr"`
+			    Length string `xml:"length,attr"`
+			    Type   string `xml:"type,attr"`
+		    } `xml:"enclosure"`
+	Guid        string `xml:"guid"`
+	PubDate     string `xml:"pubDate"`
+	Duration    string `xml:"duration"`
+	Explicit    string `xml:"explicit"`
+	Keywords    string `xml:"keywords"`
 }
 
 type channel struct {
@@ -93,17 +103,17 @@ type channel struct {
 	Subtitle    string `xml:"subtitle"`
 	Summary     string `xml:"summary"`
 	Owner       struct {
-		Email string `xml:"email"`
-		Name  string `xml:"name"`
-	} `xml:"owner"`
-	Category string `xml:"category"`
-	Image    struct {
-		Href string `xml:"href,attr"`
-		Text string
-	} `xml:"image"`
-	ImageHref string `xml:"href,attr"`
-	Explicit  string `xml:"explicit"`
-	Items     []item `xml:"item"`
+			    Email string `xml:"email"`
+			    Name  string `xml:"name"`
+		    } `xml:"owner"`
+	Category    string `xml:"category"`
+	Image       struct {
+			    Href string `xml:"href,attr"`
+			    Text string
+		    } `xml:"image"`
+	ImageHref   string `xml:"href,attr"`
+	Explicit    string `xml:"explicit"`
+	Items       []item `xml:"item"`
 }
 
 type wholeBody struct {
@@ -174,7 +184,7 @@ func parseXml(url string) {
 	defer wgParseXML.Done()
 
 	// Defer randomly for random queuing
-	randomDelayuration := time.Duration(rand.Int63n(3000)*int64(time.Millisecond) + 200)
+	randomDelayuration := time.Duration(rand.Int63n(3000) * int64(time.Millisecond) + 200)
 	time.Sleep(randomDelayuration)
 
 	urlBytes, _ := GetUrlContent(url)
@@ -211,7 +221,7 @@ func main() {
 	log.Println("Begin: ", time.Now().Local())
 
 	// activate downLoaders (goroutine)
-	for ix := 0; ix < 6; ix++ {
+	for ix := 0; ix < countofDownloader; ix++ {
 		wgFileRequest.Add(1)
 		go func(ix int) {
 			wid := ix
@@ -223,11 +233,10 @@ func main() {
 		}(ix)
 	}
 
-	wgParseXML.Add(4)
-	go parseXml("http://pod.ssenhosting.com/rss/tomato2u/ilbangbangspeaking.xml")
-	go parseXml("http://pod.ssenhosting.com/rss/tomato2u/ilbangbang.xml")
-	go parseXml("http://pod.ssenhosting.com/rss/tomato2u/ilbangbangch.xml")
-	go parseXml("http://pod.ssenhosting.com/rss/tomato2u/ilbangbangabc.xml")
+	wgParseXML.Add(len(courseList))
+	for _, v := range courseList {
+		go parseXml(v)
+	}
 	wgParseXML.Wait()
 	close(chanFileRequest)
 
