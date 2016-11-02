@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	//"strconv"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -26,10 +27,11 @@ var courseList = [...]string{"http://pod.ssenhosting.com/rss/tomato2u/ilbangbang
 	"http://pod.ssenhosting.com/rss/tomato2u/businessenglish.xml",
 }
 
-var countofDownloader int = 12
+var countofDownloader int = 4
 
 // GetContent get URL as byte array
-func GetUrlContent(url string) ([]byte, error) {
+func GetUrlContent(url string, depth int) ([]byte, error) {
+	log.Println(depth, url)
 	var result []byte
 	var err error
 	client := &http.Client{
@@ -37,22 +39,33 @@ func GetUrlContent(url string) ([]byte, error) {
 	}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
+		log.Println("http.NewRequest", err)
 		return nil, err
 	}
 	req.Header.Add("User-Agent", "curl/7.50.3")
 	req.Header.Add("Accept", "*/*")
 	resp, err := client.Do(req)
 	if err != nil {
+		log.Println("client.Do", err)
 		return nil, err
 	}
+	defer resp.Body.Close()
 	finalUrl := resp.Request.URL.String()
 	if finalUrl != url {
-		result, err = GetUrlContent(finalUrl)
+		depth1 := depth + 1
+		result, err = GetUrlContent(finalUrl, depth1)
+		return result, err
 	} else {
-		defer resp.Body.Close()
-		result, err = ioutil.ReadAll(resp.Body)
+		if resp.StatusCode == 200 {
+			result, err = ioutil.ReadAll(resp.Body)
+			log.Println("S", url)
+			return result, err
+		} else {
+			log.Println("client.Do", resp.StatusCode, url)
+			fmt.Printf(resp.Status)
+			return nil, errors.New("Response Error")
+		}
 	}
-	return result, err
 }
 
 // regex for name normalization
@@ -80,15 +93,15 @@ type item struct {
 	Summary     string `xml:"summary"`
 	Description string `xml:"description"`
 	Enclosure   struct {
-			    Url    string `xml:"url,attr"`
-			    Length string `xml:"length,attr"`
-			    Type   string `xml:"type,attr"`
-		    } `xml:"enclosure"`
-	Guid        string `xml:"guid"`
-	PubDate     string `xml:"pubDate"`
-	Duration    string `xml:"duration"`
-	Explicit    string `xml:"explicit"`
-	Keywords    string `xml:"keywords"`
+		Url    string `xml:"url,attr"`
+		Length string `xml:"length,attr"`
+		Type   string `xml:"type,attr"`
+	} `xml:"enclosure"`
+	Guid     string `xml:"guid"`
+	PubDate  string `xml:"pubDate"`
+	Duration string `xml:"duration"`
+	Explicit string `xml:"explicit"`
+	Keywords string `xml:"keywords"`
 }
 
 type channel struct {
@@ -103,17 +116,17 @@ type channel struct {
 	Subtitle    string `xml:"subtitle"`
 	Summary     string `xml:"summary"`
 	Owner       struct {
-			    Email string `xml:"email"`
-			    Name  string `xml:"name"`
-		    } `xml:"owner"`
-	Category    string `xml:"category"`
-	Image       struct {
-			    Href string `xml:"href,attr"`
-			    Text string
-		    } `xml:"image"`
-	ImageHref   string `xml:"href,attr"`
-	Explicit    string `xml:"explicit"`
-	Items       []item `xml:"item"`
+		Email string `xml:"email"`
+		Name  string `xml:"name"`
+	} `xml:"owner"`
+	Category string `xml:"category"`
+	Image    struct {
+		Href string `xml:"href,attr"`
+		Text string
+	} `xml:"image"`
+	ImageHref string `xml:"href,attr"`
+	Explicit  string `xml:"explicit"`
+	Items     []item `xml:"item"`
 }
 
 type wholeBody struct {
@@ -133,23 +146,26 @@ func urlFile(url string, folder string, filename string, wid int) {
 		return
 	}
 
-	fmt.Println(wid, folder, filename)
-	urlBytes, err := GetUrlContent(url)
+	urlBytes, err := GetUrlContent(url, 0)
+	if urlBytes == nil {
+		return
+	}
 
 	//open a file for writing
 	file, err := os.Create(folder + string(filepath.Separator) + filename)
 	if err != nil {
-		log.Fatal(err)
+		log.Println("os.Create", err)
+		return
 	}
 	defer file.Close()
 
 	// Use io.Copy to just dump the response body to the file. This supports huge files
 	_, err = io.Copy(file, bytes.NewReader(urlBytes))
 	if err != nil {
-		log.Fatal(err)
+		log.Println("io.copy", err)
+	} else {
+		fmt.Println(wid, folder, filename)
 	}
-
-	log.Println(folder, filename)
 
 }
 
@@ -159,35 +175,38 @@ func itemFilename(item item) (string, string) {
 	//datetimeString := t.Format("060102-1504")
 	dateString := t.Format("060102")
 	/*
-	// how long
-	dursplit := strings.Split(item.Duration, ":")
-	durH, _ := strconv.Atoi(dursplit[0])
-	durM, _ := strconv.Atoi(dursplit[1])
-	durS, _ := strconv.Atoi(dursplit[2])
-	minutes := durH*60 + durM
-	if durS > 0 {
-		minutes += 1
-	}
-	minutesString := fmt.Sprintf("%03d", minutes)
+		// how long
+		dursplit := strings.Split(item.Duration, ":")
+		durH, _ := strconv.Atoi(dursplit[0])
+		durM, _ := strconv.Atoi(dursplit[1])
+		durS, _ := strconv.Atoi(dursplit[2])
+		minutes := durH*60 + durM
+		if durS > 0 {
+			minutes += 1
+		}
+		minutesString := fmt.Sprintf("%03d", minutes)
 	*/
 	// file extension
-	pointpos := strings.LastIndex(item.Enclosure.Url, ".")
+	pointpos := strings.LastIndex(item.Guid, ".")
 	// normalize title
 	editedTitle := string(oneBlank.ReplaceAll(chonly.ReplaceAll([]byte(strings.Trim(item.Title, " ")), []byte("")), []byte("_")))
-	ext := string(item.Enclosure.Url[pointpos:])
+	ext := string(item.Guid[pointpos:])
 	//return datetimeString + "-" + minutesString + "-" + editedTitle + ext, ext
 	return dateString + "-" + editedTitle + ext, ext
 }
 
+var parseXmlCount int = 0
 func parseXml(url string) {
 
 	defer wgParseXML.Done()
 
 	// Defer randomly for random queuing
-	randomDelayuration := time.Duration(rand.Int63n(3000) * int64(time.Millisecond) + 200)
+	randomDelayuration := time.Duration(rand.Int63n(3000)*int64(time.Millisecond) + 200)
 	time.Sleep(randomDelayuration)
 
-	urlBytes, _ := GetUrlContent(url)
+	urlBytes, _ := GetUrlContent(url, 0)
+	parseXmlCount++
+	ioutil.WriteFile(fmt.Sprintf("Xml%02d.xml",parseXmlCount),urlBytes, 0644)
 
 	var wholeBody wholeBody
 	xml.Unmarshal(urlBytes, &wholeBody)
@@ -202,8 +221,8 @@ func parseXml(url string) {
 			continue
 		}
 
-		//urlFile(mp3info.Enclosure.Url, folderName, mp3Filename)
-		chanFileRequest <- downReq{mp3info.Enclosure.Url, folderName, mp3Filename}
+		//urlFile(mp3info.Guid, folderName, mp3Filename)
+		chanFileRequest <- downReq{mp3info.Guid, folderName, mp3Filename}
 	}
 
 }
@@ -211,7 +230,7 @@ func parseXml(url string) {
 func main() {
 
 	// Logging Setup
-	logFile, err := os.OpenFile("download.log", os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
+	logFile, err := os.OpenFile("download.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		log.Fatalf("Error opening log file: %v", err)
 	}
